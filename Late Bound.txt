@@ -1,0 +1,134 @@
+using System;
+using System.Collections.ObjectModel;
+using System.Globalization;
+using System.Linq;
+using System.ServiceModel;
+using cT.powerThings.PowerPlatform.SLAManager.ProxyClasses;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Client;
+using Microsoft.Xrm.Sdk.Query;
+
+namespace cT.powerThings.PowerPlatform.SLAManager
+{
+    public partial class Update_milestone_template : BasePlugin
+    {
+        private IOrganizationService service;
+        private ITracingService tracingService;
+        private Guid notificationTemplateId = Guid.Empty;
+        private Guid milestoneTemplateId = Guid.Empty;
+        private Guid milestoneId = Guid.Empty;
+        private Entity entity = new Entity();
+        bool flag = false;
+        Guid processTypeId = Guid.Empty;
+
+        public Update_milestone_template(string unsecureConfig, string secureConfig) : base(unsecureConfig, secureConfig)
+        {
+            // Register for any specific events by instantiating a new instance of the 'PluginEvent' class and registering it
+            base.RegisteredEvents.Add(new PluginEvent()
+            {
+                Stage = eStage.PostOperation,
+                MessageName = MessageNames.Update,
+                EntityName = EntityNames.notification,
+                PluginAction = ExecutePluginLogic
+            });
+        }
+
+        public void ExecutePluginLogic(IServiceProvider serviceProvider)
+        {
+
+            using (var localContext = new LocalPluginContext<Entity>(serviceProvider))
+            {
+                //Guid milestone = Guid.Empty;
+
+                try
+                {
+                    var targetEntity = localContext.TargetEntity.ToEntity<ctpt_Notification>();
+                    targetEntity.ctpt_NotificationSent = true;
+                    //GetMilestoneNotification(localContext.TargetEntity, localContext.OrganizationService, localContext.CrmContext);
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidPluginExecutionException(ex.Message);
+                }
+            }
+        }
+
+        public void GetMilestoneNotification(ctpt_Notification targetEntity, IOrganizationService service, OrganizationServiceContext crmContext)
+        {
+            string ctpt_notificationsent = "false";
+            bool? notificationFLAG = false;
+            //Guid mileStone = Guid.Empty;
+            //string ctpt_notificationsent = "false";
+
+            //if (targetEntity.ctpt_NotificationSent != null)
+            //{
+            //    ctpt_notificationsent = targetEntity.Attributes["ctpt_notificationsent"] != null ? (targetEntity == true ? "true" : "false") : ctpt_notificationsent;
+            //}
+
+
+            notificationFLAG = targetEntity.ctpt_NotificationSent;
+            
+            int AutoComplete;
+            if (notificationFLAG.HasValue && notificationFLAG.Value)
+           
+                if (targetEntity.Attributes.Contains("ctpt_notificationtemplateid"))
+                {
+                    milestoneId = targetEntity.GetAttributeValue<EntityReference>("ctpt_milestonetemplateid") != null ? ((EntityReference)targetEntity.Attributes["ctpt_milestonetemplateid"]).Id : Guid.Empty;
+
+                    Entity MilestoneEntity = service.Retrieve("ctpt_milestone", milestoneId, new ColumnSet("statecode"));
+                    MilestoneEntity ["statecode"] = 1;
+
+                    //ctpt_Milestone MilestoneEntity = (ctpt_Milestone)service.Retrieve(ctpt_Milestone.LogicalName, milestoneId, new ColumnSet(ctpt_Milestone.Properties.StateCode));
+                    //MilestoneEntity.StateCode = eCtpt_milestone_statecode.Completed;
+
+                    notificationTemplateId = targetEntity.GetAttributeValue<EntityReference>("ctpt_notificationtemplateid") != null ? ((EntityReference)targetEntity.Attributes["ctpt_notificationtemplateid"]).Id : Guid.Empty;
+                    Entity notificationTemplate = service.Retrieve("ctpt_notificationtemplate", notificationTemplateId, new ColumnSet("ctpt_milestonetemplateid"));
+                    milestoneTemplateId = notificationTemplate.GetAttributeValue<EntityReference>("ctpt_milestonetemplateid") != null ? ((EntityReference)targetEntity.Attributes["ctpt_milestonetemplateid"]).Id : Guid.Empty;
+                    
+                    Entity MilestoneTemplateEntity = service.Retrieve("ctpt_milestone", milestoneTemplateId, new ColumnSet("ctpt_autocomplete"));
+                    AutoComplete = MilestoneTemplateEntity.GetAttributeValue<OptionSetValue>("ctpt_autocomplete").Value;
+                    
+                    if (AutoComplete ==1)
+                    {
+                        String notification = "<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='false'>" +
+                                                "  <entity name='ctpt_notification'>" +
+                                                "    <attribute name='ctpt_notificationid' />" +
+                                                "    <attribute name='ctpt_name' />" +
+                                                "    <attribute name='createdon' />" +
+                                                "    <attribute name='ctpt_notificationsent' />" +
+                                                "    <attribute name='ctpt_notificationtemplateid' />" +
+                                                "    <attribute name='ctpt_milestoneid' />" +
+                                                "    <attribute name='ctpt_duedate' />" +
+                                                "    <order attribute='ctpt_name' descending='false' />" +
+                                                "    <link-entity name='ctpt_notificationtemplate' from='ctpt_notificationtemplateid' to='ctpt_notificationtemplateid' link-type='inner' alias='ac'>" +
+                                                "      <filter type='and'>" +
+                                                "        <condition attribute='ctpt_milestonetemplateid' operator='eq' uitype='ctpt_milestone' value='" + milestoneTemplateId + "/>" +
+                                                "      </filter>" +
+                                                "    </link-entity>" +
+                                                "  </entity>" +
+                                                "</fetch>";
+                        EntityCollection NotificationCol = service.RetrieveMultiple(new FetchExpression(notification));
+                        if(NotificationCol.Entities.Count > 0)
+                        {
+
+                            foreach(Entity notificationSent in NotificationCol.Entities)
+                            {
+                                bool notificationsent = (bool)notificationSent.Attributes["ctpt_notificationsent"];
+                                if (notificationsent == true) { flag = true; }
+                                else
+                                {
+                                    return;
+                                }
+                            }
+                            if (flag == true)
+                            {
+                                service.Update(MilestoneEntity);
+                            }
+
+                        }
+                    }                  
+                }
+        }
+    }
+ }
+   

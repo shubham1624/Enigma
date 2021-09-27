@@ -1,0 +1,116 @@
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Globalization;
+using System.Linq;
+using System.ServiceModel;
+using cT.powerThings.PowerPlatform.SLAManager.Model;
+using cT.powerThings.PowerPlatform.SLAManager.ProxyClasses;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Client;
+using Microsoft.Xrm.Sdk.Query;
+
+namespace cT.powerThings.PowerPlatform.SLAManager
+{
+    public partial class Update_milestone_template : BasePlugin
+    {
+
+        private Guid notificationTemplateId = Guid.Empty;
+        private Guid milestoneTemplateId = Guid.Empty;
+        private Guid milestoneId = Guid.Empty;
+        private Entity entity = new Entity();
+        //bool flag = false;
+        Guid processTypeId = Guid.Empty;
+
+        public Update_milestone_template(string unsecureConfig, string secureConfig) : base(unsecureConfig, secureConfig)
+        {
+
+            // Register for any specific events by instantiating a new instance of the 'PluginEvent' class and registering it
+            base.RegisteredEvents.Add(new PluginEvent()
+            {
+                Stage = eStage.PostOperation,
+                MessageName = MessageNames.Update,
+                EntityName = EntityNames.ctpt_notification,
+                PluginAction = ExecutePluginLogic
+            });
+        }
+        internal ITracingService TracingService { get; private set; }
+
+        public void ExecutePluginLogic(IServiceProvider serviceProvider)
+        {
+
+            using (var localContext = new LocalPluginContext<Entity>(serviceProvider))
+            {
+
+                try
+                {
+                    var targetEntity = localContext.TargetEntity.ToEntity<ctpt_Notification>();
+                    //targetEntity.ctpt_NotificationSent = true;
+                    GetMilestoneNotification(targetEntity, localContext.OrganizationService, localContext.CrmContext);
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidPluginExecutionException(ex.Message);
+                }
+            }
+        }
+
+        public void GetMilestoneNotification(ctpt_Notification targetEntity, IOrganizationService service, OrganizationServiceContext crmContext)
+        {
+
+            bool? notificationFLAG = false;
+
+            notificationFLAG = targetEntity.ctpt_NotificationSent;
+
+
+            if (notificationFLAG.HasValue && notificationFLAG.Value)
+
+                if (targetEntity.Id != null && !targetEntity.Id.Equals(Guid.Empty))
+                {
+                    ctpt_Notification notificationEntity = (ctpt_Notification)service.Retrieve(ctpt_Notification.LogicalName, targetEntity.Id, new ColumnSet(true));
+                    milestoneId = notificationEntity.ctpt_MilestoneId != null ? notificationEntity.ctpt_MilestoneId.Id : Guid.Empty;
+                    //ctpt_Milestone MilestoneEntity = (ctpt_Milestone)service.Retrieve(ctpt_Milestone.LogicalName, milestoneId, new ColumnSet(ctpt_Milestone.Properties.StateCode));
+                    ctpt_Milestone MilestoneEntity = new ctpt_Milestone();
+                    MilestoneEntity.Id = milestoneId;
+                    MilestoneEntity.StateCode = eCtpt_milestone_statecode.Completed;
+
+                    notificationTemplateId = notificationEntity.ctpt_notificationtemplateid != null ? notificationEntity.ctpt_notificationtemplateid.Id : Guid.Empty;
+                    ctpt_NotificationTemplate NotificationTemplateEntity = (ctpt_NotificationTemplate)service.Retrieve(ctpt_NotificationTemplate.LogicalName, notificationTemplateId, new ColumnSet(ctpt_NotificationTemplate.Properties.ctpt_MilestoneTemplateId));
+                    milestoneTemplateId = NotificationTemplateEntity.ctpt_MilestoneTemplateId != null ? NotificationTemplateEntity.ctpt_MilestoneTemplateId.Id : Guid.Empty;
+
+                    ctpt_MilestoneTemplate MilestoneTemplateEntity = service.Retrieve(ctpt_MilestoneTemplate.LogicalName, milestoneTemplateId, new ColumnSet(ctpt_MilestoneTemplate.Properties.ctpt_AutoComplete)).ToEntity<ctpt_MilestoneTemplate>();
+                    milestoneTemplateId = NotificationTemplateEntity.ctpt_MilestoneTemplateId != null ? NotificationTemplateEntity.ctpt_MilestoneTemplateId.Id : Guid.Empty;
+
+                    if (MilestoneTemplateEntity.ctpt_AutoComplete.HasValue && MilestoneTemplateEntity.ctpt_AutoComplete.Value)
+                    {
+                        List<ctpt_Notification> nt = new List<ctpt_Notification>();
+                        var Notifications = (from notification in crmContext.CreateQuery<ctpt_Notification>()
+                                             join notificationTemplate in crmContext.CreateQuery<ctpt_NotificationTemplate>()
+                                                 on notification.ctpt_notificationtemplateid equals notificationTemplate.ctpt_MilestoneTemplateId
+                                             where notificationTemplate.ctpt_MilestoneTemplateId != null
+                                             && notification.ctpt_notificationtemplateid != null
+                                                && notificationTemplate.ctpt_MilestoneTemplateId.Id == milestoneTemplateId
+                                             select notification).ToList();
+
+                        int totalNotifications = Notifications.Count;
+                        int sentNotifications = 0;
+
+                        foreach (var Notification in Notifications)
+                        {
+                            if (Notification.ctpt_NotificationSent == true)
+                            {
+                                sentNotifications++;
+                            }
+                        }
+
+                        if (totalNotifications == sentNotifications)
+                        {
+                            service.Update(MilestoneEntity);
+                        }
+                                                
+                    }
+                }
+        }
+    }
+
+}
